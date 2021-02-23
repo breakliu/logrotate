@@ -1,57 +1,98 @@
 # Logrotate
 
-Simple docker container that does logrotate. Designed as sidecar container for Kubernetes pods that
-write logfiles but don't do rotation themselves.
+Simplified version of [honestbee/logrotate](https://github.com/honestbee/logrotate), not configurable using environment variables. Instead a `logrotate.conf` file needs to be mounted into this container.
 
-## Considerations
-
-- You most likely don't want to keep a ton of old log files in a running pod
-- The purpose of this is solely to ensure logs don't fill up the disk - not long-term archival
-- Instead, use a sidecar to `tail` the active log and let the K8S log collector handle the rest
+Updated to latest alpine image to fix some vulnerabilities.
 
 ## Usage
 
+- Use shared volumes to add `/etc/logrotate.conf` into the container
 - Use shared volumes to share log files with a container that produces logfiles
-- Set `LOGROTATE_PATTERN` etc. to configure what logrotate watches, log file size, etc.
-- See [docker-compose.yaml](docker-compose.yaml) for a sample app
+- Set `CRON_SCHEDULE`
 
 ### Standalone
 
 ```sh
 docker run -it --rm \
-  --env CRON_SCHEDULE='' \
-  --env LOGROTATE_SIZE=1M \
-  --env LOGROTATE_PATTERN=/myapp/logs/*.log \
-  -v logs:/myapp/logs
-  quay.io/honestbee/logrotate
+  --env CRON_SCHEDULE='* * * * *' \
+  -v $(pwd)/example/logrotate.conf:/etc/logrotate.conf:ro \
+  -v $(pwd)/example/logs:/logs \
+  skymatic/logrotate
+# now log to example/logs/example.log and see rotation on every 1MiB
 ```
 
-### Docker Compose
+### Kubernetes
 
-- Starts a small sample app that writes a logfile and rotates it:
+Example running logrotate as a sidecar for traefik:
 
-  ```sh
-  docker-compose up
-  ```
+```yml
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: logs
+spec:
+  # ...
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: configs
+data:
+  logrotate.conf: |
+    /logs/traefik.log {
+        rotate 5
+        copytruncate
+        size 100M
+        missingok
+        nocompress
+
+        postrotate
+            pkill -USR1 traefik
+        endscript
+    }
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  # ...
+spec:
+  # ...
+  template:
+    spec:
+      # ...
+      shareProcessNamespace: true # allows access to traefik's PID from sidecar
+      containers:
+      - name: traefik
+        # ...
+      - name: logrotate
+        image: skymatic/logrotate:latest
+        env:
+          - name: CRON_SCHEDULE
+            value: "0 * * * *"
+          - name: TINI_SUBREAPER # tini won't be PID 1 due to shareProcessNamespace
+            value: 
+        volumeMounts:
+        - mountPath: /etc/logrotate.conf
+          name: configs-vol
+          subPath: logrotate.conf
+          readOnly: true
+        - mountPath: /logs/
+          name: logs-vol
+      volumes:
+      - name: logs-vol
+        persistentVolumeClaim:
+            claimName: logs
+      - name: configs-vol
+        configMap:
+          name: configs
+```
 
 ## Customization
-
-Most options below are substituted into the config file for logrotate, so please refer to the
-[Manpage for logrotate](https://linux.die.net/man/8/logrotate) for detailled documentation.
 
 |Option|Default|Description|
 |------|-------|-----------|
 |`CRON_SCHEDULE`|`0 * * * *`|Cron schedule for logrotate command|
-|`LOGROTATE_SIZE`|`100M`|Maximum size of log files|
-|`LOGROTATE_MODE`|`copytruncate`|Mode of log rotation|
-|`LOGROTATE_PATTERN`|`/logs/*.log`|Path pattern of log files to manage|
-|`LOGROTATE_ROTATE`|`0`|Number of old log files to keep|
-
-## Alternatives
-
-[blacklabelops/logrotate](https://github.com/blacklabelops/logrotate) allows more configuration
-options but was not chosen on grounds of the images not being controlled by us and the sensitive
-nature of logs.
 
 ## See Also
 

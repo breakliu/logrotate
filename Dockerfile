@@ -1,16 +1,9 @@
-FROM alpine:3.7
+FROM alpine:3.13
 
-ENV CRON_SCHEDULE='0 * * * *' \
-    LOGROTATE_SIZE='100M' \
-    LOGROTATE_MODE='copytruncate' \
-    LOGROTATE_PATTERN='/logs/*.log' \
-    LOGROTATE_ROTATE='0'
+ENV CRON_SCHEDULE='0 * * * *'
 
-RUN apk --no-cache add logrotate tini gettext libintl \
-    && mkdir -p /logs \
-    && mkdir -p /etc/logrotate.d
+RUN apk --no-cache add logrotate tini libintl procps
 
-COPY logrotate.tpl.conf /logrotate.tpl.conf
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
