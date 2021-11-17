@@ -1,4 +1,4 @@
-IMAGE = honestbee/logrotate
+IMAGE = breakliu/logrotate
 TAG = local
 
 CRON_SCHEDULE ?= * * * * *
